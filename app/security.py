@@ -11,7 +11,10 @@ security_scheme = HTTPBearer(auto_error=True)
 async def verify_jwt_token(
     credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
 ) -> dict:
-    """Decrypt and verify the incoming HS256 JWT token from the Authorization header."""
+    """
+    Decrypt and verify the incoming HS256 JWT token
+    from the Authorization header.
+    """
     token = credentials.credentials
     try:
         payload = jwt.decode(
