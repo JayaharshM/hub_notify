@@ -71,11 +71,12 @@ class SubmitJobRequest(BaseModel):
     payload: dict = {}
 
 
-# ── Legacy payload (backward compat with existing notify router) ──────────────
+# ── Legacy payload (backward compat with existing notify router) ──────────
 
 class NotifyPayload(BaseModel):
     """A single notification task — published to RabbitMQ as JSON."""
     job_id: str
+    notification_id: str | None = None
     channel: str            # 'email' | 'sms' | 'push' | 'whatsapp'
     recipient: str          # email address, phone number, or FCM token
     subject: str | None = None
