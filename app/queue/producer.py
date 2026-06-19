@@ -21,40 +21,82 @@ QUEUE_NAMES = {
 async def publish(
     payload: NotifyPayload, routing_key: str | None = None
 ) -> None:
-    """Publish a single notification task to the appropriate RabbitMQ queue."""
-    queue_name = routing_key or QUEUE_NAMES.get(payload.channel)
-    if not queue_name:
-        raise ValueError(f"Unknown channel: {payload.channel}")
+    """Publish a single notification task to RabbitMQ with publisher retries."""
+    import logging
+    logger = logging.getLogger(__name__)
 
-    connection = await aio_pika.connect_robust(settings.rabbitmq_url)
-    async with connection:
-        channel = await connection.channel()
+    max_publish_attempts = 4
+    for attempt in range(1, max_publish_attempts + 1):
+        try:
+            connection = await aio_pika.connect_robust(settings.rabbitmq_url)
+            async with connection:
+                channel = await connection.channel()
 
-        arguments = None
-        if ".retry." in queue_name:
-            parts = queue_name.split(".")
-            try:
-                delay_str = parts[-1].replace("s", "")
-                delay_sec = int(delay_str)
-                base_channel = parts[0]
-                arguments = {
-                    "x-dead-letter-exchange": "",
-                    "x-dead-letter-routing-key": f"{base_channel}.process",
-                    "x-message-ttl": delay_sec * 1000,
-                }
-            except Exception:
-                pass
+                # Declare main direct exchange
+                exchange = await channel.declare_exchange(
+                    "notification.exchange",
+                    aio_pika.ExchangeType.DIRECT,
+                    durable=True
+                )
 
-        queue = await channel.declare_queue(
-            queue_name, durable=True, arguments=arguments
-        )
-        await channel.default_exchange.publish(
-            aio_pika.Message(
-                body=payload.model_dump_json().encode(),
-                delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-            ),
-            routing_key=queue.name,
-        )
+                # Declare Dead Letter Exchange (DLX)
+                dlx = await channel.declare_exchange(
+                    "dla.exchange",
+                    aio_pika.ExchangeType.DIRECT,
+                    durable=True
+                )
+
+                priority = payload.priority
+                if priority not in ("high", "medium", "low"):
+                    priority = "high"
+
+                if routing_key:
+                    # Parse delay and declare retry queue
+                    arguments = None
+                    if ".retry." in routing_key:
+                        parts = routing_key.split(".")
+                        try:
+                            delay_str = parts[-1].replace("s", "")
+                            delay_sec = int(delay_str)
+                            base_channel = parts[0]
+                            arguments = {
+                                "x-dead-letter-exchange": "",
+                                "x-dead-letter-routing-key": f"{base_channel}.process",
+                                "x-message-ttl": delay_sec * 1000,
+                            }
+                        except Exception:
+                            arguments = None
+
+                    # Declare the retry queue
+                    queue = await channel.declare_queue(
+                        routing_key, durable=True, arguments=arguments
+                    )
+                    # Publish to the retry queue
+                    await channel.default_exchange.publish(
+                        aio_pika.Message(
+                            body=payload.model_dump_json().encode(),
+                            delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                        ),
+                        routing_key=queue.name,
+                    )
+                else:
+                    # Publish to the main exchange with priority routing key
+                    await exchange.publish(
+                        aio_pika.Message(
+                            body=payload.model_dump_json().encode(),
+                            delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                        ),
+                        routing_key=priority,
+                    )
+            # If we reached here, publishing succeeded!
+            return
+        except Exception as exc:
+            if attempt == max_publish_attempts:
+                logger.error("Failed to publish message after %d attempts: %s", max_publish_attempts, exc)
+                raise exc
+            backoff = (2 ** attempt) * 0.1
+            logger.warning("Publish attempt %d failed: %s. Retrying in %.2f seconds...", attempt, exc, backoff)
+            await asyncio.sleep(backoff)
 
 
 async def publish_notification(
@@ -93,5 +135,7 @@ async def publish_notification(
         title=notification.title,
         data=notification.data,
         attempt=notification.attempt,
+        priority=getattr(notification, "priority", "high"),
+        message_type=getattr(notification, "message_type", "general"),
     )
     await publish(payload)
