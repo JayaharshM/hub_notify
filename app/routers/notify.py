@@ -32,6 +32,8 @@ class SingleSendRequest(BaseModel):
     title: str | None = None
     data: dict | None = None
     scheduled_at: datetime | None = None
+    priority: str = "high"
+    message_type: str = "general"
 
 
 class BulkRecipient(BaseModel):
@@ -39,6 +41,8 @@ class BulkRecipient(BaseModel):
     subject: str | None = None
     body: str = ""
     html_body: str | None = None
+    priority: str = "high"
+    message_type: str = "general"
 
 
 class BulkSendRequest(BaseModel):
@@ -89,6 +93,8 @@ async def send_single(
         html_body=body.html_body,
         title=body.title,
         data=body.data,
+        priority=body.priority,
+        message_type=body.message_type,
     )
     db.add(ind_notification)
     await db.commit()
@@ -139,6 +145,8 @@ async def send_bulk(body: BulkSendRequest, db: AsyncSession = Depends(get_db)):
             subject=r.subject,
             body=r.body,
             html_body=r.html_body,
+            priority=r.priority,
+            message_type=r.message_type,
         )
         db.add(ind_notification)
         notifications_data.append(ind_notification)

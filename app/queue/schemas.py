@@ -75,7 +75,7 @@ class SubmitJobRequest(BaseModel):
 
 class NotifyPayload(BaseModel):
     """A single notification task — published to RabbitMQ as JSON."""
-    job_id: str
+    job_id: str | None = None
     notification_id: str | None = None
     channel: str            # 'email' | 'sms' | 'push' | 'whatsapp'
     recipient: str          # email address, phone number, or FCM token
@@ -86,3 +86,5 @@ class NotifyPayload(BaseModel):
     data: dict | None = None    # for push notification data payload
     attempt: int = 1
     max_attempts: int = 4
+    priority: str = "high"
+    message_type: str = "general"
