@@ -25,4 +25,9 @@ htmlcov/
 
 # Local task tracking
 tasks.md
+task.md
+
+# Log files
+*.log
+
 
